@@ -625,39 +625,79 @@ function givepriority {
 # names (lpkg) and packages unique to one or other file (dpkg)
 #
 function listpkgname() {
-	cut -f2 -d\  ${TMPDIR}/pkglist | sort > ${TMPDIR}/spkg	
-	cut -f2 -d\  ${TMPDIR}/tmplist | sort > ${TMPDIR}/lpkg
-	cat ${TMPDIR}/pkglist ${TMPDIR}/tmplist | \
-		cut -f2-6 -d\ |sort | uniq -u | \
-		cut -f1 -d\  | uniq > ${TMPDIR}/dpkg
+    # Generate spkg (mirror package names) and lpkg (local package names)
+    cut -f2 -d\  ${TMPDIR}/pkglist | sort > ${TMPDIR}/spkg
+    cut -f2 -d\  ${TMPDIR}/tmplist | sort > ${TMPDIR}/lpkg
+
+    # Create dpkg (packages unique to one or the other file)
+    cat ${TMPDIR}/pkglist ${TMPDIR}/tmplist | \
+        cut -f2-6 -d\ | sort | uniq -u | \
+        cut -f1 -d\  | uniq | sort > ${TMPDIR}/dpkg
+
+    # Ensure dpkg is sorted for the comm comparison
+    sort ${TMPDIR}/dpkg -o ${TMPDIR}/dpkg
+
+    # Check if the whitelist exists and log its contents for debugging
+    if [ -f $CONF/whitelist ]; then
+        echo "Whitelist found, processing..."  # Log for debugging
+        # Process and append the whitelist to dpkg list
+        while read whitelist_package; do
+            echo "Processing whitelist package: $whitelist_package"  # Log for debugging
+
+            # Check if the package is already in dpkg
+            if grep -q "^$whitelist_package$" ${TMPDIR}/dpkg; then
+                echo "Package $whitelist_package already in dpkg, skipping."
+            else
+                echo "Adding to dpkg: $whitelist_package"  # Log for debugging
+                echo "$whitelist_package" >> ${TMPDIR}/dpkg
+            fi
+        done < $CONF/whitelist
+
+        # Log the contents of dpkg after appending the whitelist
+        echo "Added whitelist:"  # Log for debugging
+    else
+        echo "Whitelist not found."  # Log for debugging
+    fi
+
+    # Ensure dpkg is sorted again after whitelist is added
+    sort ${TMPDIR}/dpkg -o ${TMPDIR}/dpkg
 }
 
 # Create a blacklist of single package names from regexps in original blacklist
 # any sets such as kde/ are converted to single package names in the process
 # the final list will be used by 'applyblacklist' later.
 function mkregex_blacklist() {
-	# Check that we have the files we need
-	if [ ! -f ${WORKDIR}/pkglist ] || [ ! -f ${CONF}/blacklist ];then
-		return 1
-	fi
+    # Check that we have the necessary files
+    if [ ! -f ${WORKDIR}/pkglist ] || [ ! -f ${CONF}/blacklist ]; then
+        return 1
+    fi
 
-	# Create tmp blacklist in a more usable format
-	sed -E "s,(^[[:blank:]]+|[[:blank:]]+$),,
-		/(^#|^$)/d
-		s,^, ,
-		s,$, ,
-		s,^ (extra|pasture|patches|slackware(|64)|testing)/ $,^\1 ,
-		s,^ ([^/]+)/ $, \\\./$PKGMAIN/\1\$,
-		" ${CONF}/blacklist > ${TMPDIR}/blacklist.tmp
+    # Create a temporary blacklist in a more usable format
+    sed -E "s,(^[[:blank:]]+|[[:blank:]]+$),,
+        /(^#|^$)/d
+        s,^, ,
+        s,$, ,
+        s,^ (extra|pasture|patches|slackware(|64)|testing)/ $,^\1 ,
+        s,^ ([^/]+)/ $, \\\./$PKGMAIN/\1\$,
+        " ${CONF}/blacklist > ${TMPDIR}/blacklist.tmp
 
-	# Filter server and local package lists through blacklist
-	( cat ${WORKDIR}/pkglist
-		printf "%s\n" $ROOT/var/log/packages/* |
-			awk -f /usr/libexec/slackpkg/pkglist.awk
-	) | cut -d\  -f1-7 | grep -E -f ${TMPDIR}/blacklist.tmp |
-		awk '{print $2}' | sort -u | sed "s,[+],[+],g
-		s,$,-[^-]+-($ARCH|noarch|fw)-[^-]+,g" > ${TMPDIR}/blacklist
+    # Filter server and local package lists through blacklist
+    ( cat ${WORKDIR}/pkglist
+      printf "%s\n" $ROOT/var/log/packages/* |
+        awk -f /usr/libexec/slackpkg/pkglist.awk
+    ) | cut -d\  -f1-7 | grep -E -f ${TMPDIR}/blacklist.tmp |
+        awk '{print $2}' | sort -u | sed "s,[+],[+],g
+        s,$,-[^-]+-($ARCH|noarch|fw)-[^-]+,g" > ${TMPDIR}/blacklist
+
+    # Now exclude whitelist packages from being blacklisted
+    if [ -f ${CONF}/whitelist ]; then
+        while read whitelist_package; do
+            # If the package is in the blacklist, remove it
+            sed -i "/$whitelist_package/d" ${TMPDIR}/blacklist
+        done < ${CONF}/whitelist
+    fi
 }
+
 
 # Blacklist filter
 #
