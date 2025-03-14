@@ -693,7 +693,7 @@ function mkregex_blacklist() {
     if [ -f ${CONF}/whitelist ]; then
         while read whitelist_package; do
             # If the package is in the blacklist, remove it
-            sed -i "/$whitelist_package/d" ${TMPDIR}/blacklist
+            sed -i "/^$whitelist_package-[^a-zA-Z0-9 -]\+/d" ${TMPDIR}/blacklist
         done < ${CONF}/whitelist
     fi
 }
