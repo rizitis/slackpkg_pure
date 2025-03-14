@@ -641,18 +641,22 @@ function listpkgname() {
     if [ -f $CONF/whitelist ]; then
         echo "Whitelist found, processing..."  # Log for debugging
         # Process and append the whitelist to dpkg list
-        while read whitelist_package; do
-            echo "Processing whitelist package: $whitelist_package"  # Log for debugging
+    while read whitelist_package; do
+    # Skip lines that are comments (starting with #) or empty lines
+    if [[ "$whitelist_package" =~ ^#.* ]] || [[ -z "$whitelist_package" ]]; then
+        continue
+    fi
 
-            # Check if the package is already in dpkg
-            if grep -q "^$whitelist_package$" ${TMPDIR}/dpkg; then
-                echo "Package $whitelist_package already in dpkg, skipping."
-            else
-                echo "Adding to dpkg: $whitelist_package"  # Log for debugging
-                echo "$whitelist_package" >> ${TMPDIR}/dpkg
-            fi
-        done < $CONF/whitelist
+    echo "Processing whitelist package: $whitelist_package"  # Log for debugging
 
+    # Check if the package is already in dpkg
+    if grep -q "^$whitelist_package$" ${TMPDIR}/dpkg; then
+        echo "Package $whitelist_package already in dpkg, skipping."
+    else
+        echo "Adding to dpkg: $whitelist_package"  # Log for debugging
+        echo "$whitelist_package" >> ${TMPDIR}/dpkg
+    fi
+done < $CONF/whitelist
         # Log the contents of dpkg after appending the whitelist
         echo "Added whitelist:"  # Log for debugging
     else
