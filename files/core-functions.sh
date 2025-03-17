@@ -31,6 +31,17 @@ One or more errors occurred while slackpkg was running:
 }
 trap 'cleanup' 2 14 15 		# trap CTRL+C and kill
 
+# Define which version of gnupg to use. We'll prefer gpg1 since it has fewer
+# dependencies, then gpg2, and if we don't find that we'll blindly set this
+# to gpg and deal with it later.
+if which gpg1 > /dev/null 2> /dev/null ; then
+  GPG=gpg1
+elif which gpg2 > /dev/null 2> /dev/null ; then
+  GPG=gpg2
+else
+  GPG=gpg
+fi
+
 # This create an spinning bar
 spinning() {
 	local WAITFILE
@@ -63,12 +74,6 @@ function system_setup() {
 
 	# Create $WORKDIR just in case
 	mkdir -p "${WORKDIR}"
-
-	# Set the "current" flag if system is running Slackware Current
-	if [ -n "$(echo $SLACKWARE_VERSION | sed -ne 's/.*\(+\|current\)$/\1/pi')" ] && \
-	   [ ! -e ${WORKDIR}/current ]; then
-		touch ${WORKDIR}/current
-	fi
 
 	# Select the command to fetch files and packages from network sources
 	if [ "$DOWNLOADER" = "curl" ]; then
@@ -166,9 +171,7 @@ function system_setup() {
 	# ${CONF}/blacklist.
 	[ "$CMD" != update ] && mkregex_blacklist
 
-	if [ -z "${SLACKCFVERSION}" ]; then
-		SLACKCFVERSION=$(grep "# v[0-9.]\+" $CONF/slackpkg.conf | cut -f2 -dv)
-	fi
+	SLACKCFVERSION=$(grep "# v[0-9.]\+" $CONF/slackpkg.conf | cut -f2 -dv)
 	CHECKSUMSFILE=${WORKDIR}/CHECKSUMS.md5
 	KERNELMD5=$(md5sum /boot/vmlinuz 2>/dev/null)
 	DIALOG_MAXARGS=${DIALOG_MAXARGS:-19500}
@@ -196,7 +199,7 @@ as example or overwrite it with slackpkg.conf.new.\n\
 	if [ "$ARCH" = "none" ] && [ "$CMD" != "new-config" ]; then
 		echo -e "\
 \nThe ARCH values in slackpkg.conf are now different. You can remove\n\
-ARCH from there, and slackpkg will use your current ARCH or you can look\n\
+ARCH from there, and slackpkg you use your current ARCH or you can look\n\
 at slackpkg.conf.new or slackpkg.conf manual page to see the new valid\n\
 ARCH values\n"
 		cleanup
@@ -379,11 +382,11 @@ as slackpkg cannot function without awk.\n"
 
 	# Check if gpg is enabled but no GPG command are found.
 	#
-	if ! [ "$(which gpg 2>/dev/null)" ] && [ "${CHECKGPG}" = "on" ]; then
+	if ! [ "$(which $GPG 2>/dev/null)" ] && [ "${CHECKGPG}" = "on" ]; then
 		CHECKGPG=off
 		echo -e "\n\
 gpg package not found!  Please disable GPG in ${CONF}/slackpkg.conf or install\n\
-the gnupg package.\n\n\
+the gnupg2 package.\n\n\
 To disable GPG, edit slackpkg.conf and change the value of the CHECKGPG \n\
 variable to "off" - you can see an example in the original slackpkg.conf.new\n\
 file distributed with slackpkg.\n"
@@ -392,7 +395,7 @@ file distributed with slackpkg.\n"
 
 	# Check if the Slackware GPG key are found in the system
 	#                                                       
-	GPGFIRSTTIME="$(gpg --list-keys \"$SLACKKEY\" 2>/dev/null \
+	GPGFIRSTTIME="$($GPG --list-keys \"$SLACKKEY\" 2>/dev/null \
 			| grep -c "$SLACKKEY")"
 	if [ "$GPGFIRSTTIME" = "0" ] && \
 		[ "$CMD" != "search" ] && \
@@ -554,7 +557,7 @@ function checkmd5() {
 # Verify the GPG signature of files/packages
 #
 function checkgpg() {
-	gpg --verify ${1}.asc ${1} 2>/dev/null && echo "1" || echo "0"
+	$GPG --verify ${1}.asc ${1} 2>/dev/null && echo "1" || echo "0"
 }
 
 # Fetch $SLACKKEY from a trusted source
@@ -593,8 +596,8 @@ Do you want to import the GPG key from this source? (YES|NO)\n"
 # Import $SLACKKEY
 function import_gpg_key() {
 	mkdir -p ~/.gnupg
-	gpg --yes --batch --delete-key "$SLACKKEY" &>/dev/null
-	gpg --import $TMPDIR/gpgkey &>/dev/null && \
+	$GPG --yes --batch --delete-key "$SLACKKEY" &>/dev/null
+	$GPG --import $TMPDIR/gpgkey &>/dev/null && \
 	echo -e "\t\t\tSlackware Linux Project's GPG key added"
 }
 
@@ -639,24 +642,24 @@ function listpkgname() {
 
     # Check if the whitelist exists and log its contents for debugging
     if [ -f $CONF/whitelist ]; then
-        echo "Whitelist found, processing..."  # Log for debugging
+        echo "Whitelist found, processing..."
         # Process and append the whitelist to dpkg list
-        while read whitelist_package; do
-            echo "Processing whitelist package: $whitelist_package"  # Log for debugging
-
-            # Check if the package is already in dpkg
-            if grep -q "^$whitelist_package$" ${TMPDIR}/dpkg; then
-                echo "Package $whitelist_package already in dpkg, skipping."
-            else
-                echo "Adding to dpkg: $whitelist_package"  # Log for debugging
-                echo "$whitelist_package" >> ${TMPDIR}/dpkg
-            fi
-        done < $CONF/whitelist
-
-        # Log the contents of dpkg after appending the whitelist
-        echo "Added whitelist:"  # Log for debugging
+    while read whitelist_package; do
+    # Skip lines that are comments (starting with #) or empty lines
+    if [[ "$whitelist_package" =~ ^#.* ]] || [[ -z "$whitelist_package" ]]; then
+        continue
+    fi
+    # Check if the package is already in dpkg
+    if grep -q "^$whitelist_package$" ${TMPDIR}/dpkg; then
+        echo "Package $whitelist_package already in dpkg, skipping."
     else
-        echo "Whitelist not found."  # Log for debugging
+        echo "Adding to dpkg: $whitelist_package"
+        echo "$whitelist_package" >> ${TMPDIR}/dpkg
+    fi
+    done < $CONF/whitelist
+
+    else
+        echo "Whitelist not found."
     fi
 
     # Ensure dpkg is sorted again after whitelist is added
@@ -693,11 +696,11 @@ function mkregex_blacklist() {
     if [ -f ${CONF}/whitelist ]; then
         while read whitelist_package; do
             # If the package is in the blacklist, remove it
-            sed -i "/^$whitelist_package-[^a-zA-Z0-9 -]\+/d" ${TMPDIR}/blacklist
-        done < ${CONF}/whitelist
+#           sed -i "/^$whitelist_package-/d" ${TMPDIR}/blacklist
+sed -i "/^$whitelist_package-[^a-zA-Z0-9 -]\+/d" ${TMPDIR}/blacklist
+		done < ${CONF}/whitelist
     fi
 }
-
 
 # Blacklist filter
 #
@@ -1181,7 +1184,7 @@ Please check your mirror and try again."
 				rm $TMPDIR/CHECKSUMS.md5
 				rm $TMPDIR/CHECKSUMS.md5.asc
 				echo -e "\
-\n\t\tERROR: Verification of the  gpg signature on CHECKSUMS.md5\n\
+\n\t\tERROR: Verification of the gpg signature on CHECKSUMS.md5\n\
 \t\t       failed! This could mean that the file is out of date\n\
 \t\t       or has been tampered with. If you use mirrors.slackware.com\n\
 \t\t       as your mirror, this could also mean that the mirror to\n\
