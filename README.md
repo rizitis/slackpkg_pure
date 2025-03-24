@@ -1,4 +1,6 @@
-[![asciicast](https://asciinema.org/a/zhEjSRZTx23JD52RY5eiS3yTR.svg)](https://asciinema.org/a/zhEjSRZTx23JD52RY5eiS3yTR)
+## Terminal Demo
+
+[![Watch the demo](assets/demo.png)](https://asciinema.org/a/zhEjSRZTx23JD52RY5eiS3yTR)
 
 ---
 
